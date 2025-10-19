@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Agent Population Sim</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: #0a0a0a;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #fff;
+            touch-action: none;
+        }
+        
+        #canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+        
+        .hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0,0,0,0.7);
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            pointer-events: none;
+            backdrop-filter: blur(10px);
+        }
+        
+        .hud-left {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .stat {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        
+        .stat-label {
+            font-size: 10px;
+            opacity: 0.6;
+            text-transform: uppercase;
+        }
+        
+        .stat-value {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .toolbar {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            padding: 8px;
+            border-radius: 16px;
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            backdrop-filter: blur(10px);
+        }
+        
+        .tool-btn {
+            min-width: 50px;
+            height: 50px;
+            background: rgba(255,255,255,0.1);
+            border: 2px solid transparent;
+            border-radius: 12px;
+            font-size: 24px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .tool-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .tool-btn.active {
+            background: rgba(255,255,255,0.2);
+            border-color: #4CAF50;
+            box-shadow: 0 0 20px rgba(76,175,80,0.5);
+        }
+        
+        .control-btn {
+            pointer-events: all;
+            min-width: 44px;
+            height: 44px;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .control-btn:active {
+            transform: scale(0.95);
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .side-panel {
+            position: absolute;
+            top: 0;
+            right: -300px;
+            width: 300px;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            padding: 20px;
+            transition: right 0.3s;
+            overflow-y: auto;
+            backdrop-filter: blur(20px);
+        }
+        
+        .side-panel.open {
+            right: 0;
+        }
+        
+        .panel-section {
+            margin-bottom: 24px;
+        }
+        
+        .panel-title {
+            font-size: 12px;
+            opacity: 0.6;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        
+        .panel-value {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .speed-controls {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .speed-btn {
+            flex: 1;
+            padding: 8px;
+            background: rgba(255,255,255,0.1);
+            border: 2px solid transparent;
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .speed-btn.active {
+            border-color: #4CAF50;
+            background: rgba(76,175,80,0.2);
+        }
+        
+        .toast {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            padding: 12px 20px;
+            border-radius: 8px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        
+        .toast.show {
+            opacity: 1;
+        }
+        
+        .agent-popup {
+            position: absolute;
+            background: rgba(0,0,0,0.95);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            pointer-events: none;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+            display: none;
+        }
+        
+        .agent-popup.show {
+            display: block;
+        }
+        
+        .popup-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 4px 0;
+        }
+        
+        canvas {
+            image-rendering: pixelated;
+        }
+        
+        .construction-site {
+            animation: pulse 1s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="hud">
+        <div class="hud-left">
+            <div class="stat">
+                <span class="stat-label">Population</span>
+                <span class="stat-value" id="pop-count">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Satisfaction</span>
+                <span class="stat-value" id="satisfaction">0%</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Buildings</span>
+                <span class="stat-value" id="building-count">0</span>
+            </div>
+        </div>
+        <button class="control-btn" id="pause-btn">⏸️</button>
+    </div>
+    
+    <div class="toolbar">
+        <button class="tool-btn active" data-tool="agents">👥</button>
+        <button class="tool-btn" data-tool="well">💧</button>
+        <button class="tool-btn" data-tool="farm">🌾</button>
+        <button class="tool-btn" data-tool="power">⚡</button>
+        <button class="tool-btn" data-tool="house">🏠</button>
+        <button class="tool-btn" data-tool="market">🏪</button>
+        <button class="tool-btn" data-tool="remove">❌</button>
+    </div>
+    
+    <div class="side-panel" id="side-panel">
+        <div class="panel-section">
+            <div class="panel-title">Speed</div>
+            <div class="speed-controls">
+                <button class="speed-btn" data-speed="0.5">0.5x</button>
+                <button class="speed-btn active" data-speed="1">1x</button>
+                <button class="speed-btn" data-speed="2">2x</button>
+                <button class="speed-btn" data-speed="3">3x</button>
+            </div>
+        </div>
+        
+        <div class="panel-section">
+            <div class="panel-title">Agent States</div>
+            <div id="agent-states"></div>
+        </div>
+        
+        <div class="panel-section">
+            <div class="panel-title">Resource Demand</div>
+            <div id="demand-info"></div>
+        </div>
+        
+        <div class="panel-section">
+            <div class="panel-title">Construction</div>
+            <div id="construction-info"></div>
+        </div>
+        
+        <div class="panel-section">
+            <div class="panel-title">Roads Built</div>
+            <div class="panel-value" id="road-count">0</div>
+        </div>
+        
+        <div class="panel-section">
+            <button class="control-btn" style="width: 100%;" id="reset-btn">Reset World</button>
+        </div>
+    </div>
+    
+    <div class="toast" id="toast"></div>
+    <div class="agent-popup" id="agent-popup"></div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Setup canvas
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Game state
+        const state = {
+            agents: [],
+            buildings: new Map(),
+            constructionSites: new Map(),
+            roads: new Map(),
+            camera: { x: 0, y: 0, zoom: 1, targetZoom: 1 },
+            selectedTool: 'agents',
+            paused: false,
+            speed: 1,
+            followAgent: null,
+            spatialHash: new Map(),
+            frame: 0,
+            agentIdCounter: 0,
+            buildingIdCounter: 0,
+            constructionIdCounter: 0,
+            trafficGrid: new Map(),
+            globalResources: { materials: 0 }
+        };
+        
+        // Constants
+        const CELL_SIZE = 100;
+        const AGENT_SIZE = 5;
+        const BUILDING_SIZE = 24;
+        const BUILDING_RADIUS = 60;
+        const MAX_AGENTS = 500;
+        const ROAD_CELL_SIZE = 10;
+        const ROAD_THRESHOLD = 40;
+        
+        const BUILDING_TYPES = {
+            well: { emoji: '💧', color: '#2196F3', provides: 'water', amount: 100, cost: 5 },
+            farm: { emoji: '🌾', color: '#4CAF50', provides: 'food', amount: 100, cost: 5 },
+            power: { emoji: '⚡', color: '#FFC107', provides: 'energy', amount: 100, cost: 5 },
+            house: { emoji: '🏠', color: '#9C27B0', capacity: 15, cost: 8 },
+            market: { emoji: '🏪', color: '#FF5722', radius: 80, amount: 50, cost: 10 }
+        };
+        
+        const STATE_COLORS = {
+            idle: '#ffffff',
+            seeking: '#64B5F6',
+            working: '#9C27B0',
+            starving: '#F44336',
+            satisfied: '#4CAF50',
+            constructing: '#FF9800',
+            gathering: '#00BCD4'
+        };
+        
+        // Agent class
+        class Agent {
+            constructor(x, y) {
+                this.id = state.agentIdCounter++;
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.needs = { water: 100, food: 100, energy: 100 };
+                this.state = 'idle';
+                this.target = null;
+                this.home = null;
+                this.speed = 1.2;
+                this.age = 0;
+                this.health = 100;
+                this.workTimer = 0;
+                this.starvationTimer = 0;
+                this.satisfactionTimer = 0;
+                this.constructionTarget = null;
+                this.carryingMaterials = 0;
+                this.trail = [];
+            }
+            
+            update() {
+                this.age++;
+                
+                // Consumption - much slower
+                const baseConsumption = this.state === 'working' || this.state === 'constructing' ? 1.1 : 1;
+                const atHome = this.home && this.distanceTo(this.home) < 40 ? 0.5 : 1;
+                const consumption = baseConsumption * atHome;
+                
+                this.needs.water -= 0.03 * consumption * state.speed;
+                this.needs.food -= 0.02 * consumption * state.speed;
+                this.needs.energy -= 0.015 * consumption * state.speed;
+                
+                // Clamp needs
+                this.needs.water = Math.max(0, Math.min(100, this.needs.water));
+                this.needs.food = Math.max(0, Math.min(100, this.needs.food));
+                this.needs.energy = Math.max(0, Math.min(100, this.needs.energy));
+                
+                // Check starvation - only when critically low
+                const minNeed = Math.min(this.needs.water, this.needs.food, this.needs.energy);
+                if (minNeed < 3) {
+                    this.state = 'starving';
+                    this.starvationTimer++;
+                    this.health -= 0.5 * state.speed;
+                    
+                    if (this.health <= 0 || this.starvationTimer > 600) {
+                        return false;
+                    }
+                } else {
+                    this.starvationTimer = 0;
+                    if (this.health < 100) {
+                        this.health += 0.5;
+                    }
+                }
+                
+                // Decision making
+                this.makeDecision();
+                
+                // Movement
+                this.move();
+                
+                // Update trail and track movement
+                this.trail.push({ x: this.x, y: this.y });
+                if (this.trail.length > 8) this.trail.shift();
+                this.trackMovement();
+                
+                return true;
+            }
+            
+            trackMovement() {
+                const cellX = Math.floor(this.x / ROAD_CELL_SIZE);
+                const cellY = Math.floor(this.y / ROAD_CELL_SIZE);
+                const key = `${cellX},${cellY}`;
+                
+                if (!state.trafficGrid.has(key)) {
+                    state.trafficGrid.set(key, 0);
+                }
+                state.trafficGrid.set(key, state.trafficGrid.get(key) + 1);
+            }
+            
+            distanceTo(target) {
+                if (!target) return Infinity;
+                const dx = target.x - this.x;
+                const dy = target.y - this.y;
+                return Math.sqrt(dx * dx + dy * dy);
+            }
+            
+            makeDecision() {
+                // Check if at target
+                if (this.target) {
+                    const dist = this.distanceTo(this.target);
+                    
+                    if (dist < BUILDING_RADIUS) {
+                        this.interactWithBuilding(this.target);
+                        return;
+                    }
+                }
+                
+                // Check if at construction site
+                if (this.constructionTarget) {
+                    const dist = this.distanceTo(this.constructionTarget);
+                    if (dist < 30) {
+                        this.constructBuilding();
+                        return;
+                    }
+                }
+                
+                // Priority: Seek resources aggressively - start seeking at 70%
+                if (this.needs.water < 70 || this.needs.food < 70 || this.needs.energy < 70) {
+                    this.seekResource();
+                    return;
+                }
+                
+                // Working at construction
+                if (this.workTimer > 0) {
+                    this.workTimer--;
+                    if (this.state === 'constructing') {
+                        // Continue construction
+                    } else {
+                        this.state = 'working';
+                    }
+                    return;
+                }
+                
+                // Satisfied - be more active
+                if (this.needs.water > 65 && this.needs.food > 65 && this.needs.energy > 65) {
+                    this.state = 'satisfied';
+                    this.satisfactionTimer++;
+                    
+                    // Check if should build something - less often and only if not too many construction sites
+                    if (this.age % 120 === 0 && Math.random() < 0.3 && state.constructionSites.size < 3) {
+                        const buildingNeeded = this.checkBuildingNeeds();
+                        if (buildingNeeded) {
+                            this.initiateConstruction(buildingNeeded);
+                            return;
+                        }
+                    }
+                    
+                    // Be more active - always have a goal
+                    if (!this.target || Math.random() < 0.03 * state.speed) {
+                        if (Math.random() < 0.3) {
+                            this.findWorkplace();
+                        } else if (Math.random() < 0.5 && this.home) {
+                            this.target = this.home;
+                            this.state = 'idle';
+                        } else {
+                            this.wander();
+                        }
+                    }
+                } else {
+                    this.satisfactionTimer = 0;
+                }
+            }
+            
+            checkBuildingNeeds() {
+                const buildingCounts = {
+                    well: 0, farm: 0, power: 0, house: 0, market: 0
+                };
+                
+                for (const building of state.buildings.values()) {
+                    buildingCounts[building.type]++;
+                }
+                
+                // Count how many agents are seeking each resource
+                const seekingCounts = {
+                    water: 0, food: 0, energy: 0, home: 0
+                };
+                
+                for (const agent of state.agents) {
+                    if (agent.state === 'seeking' && agent.target) {
+                        const targetBuilding = state.buildings.get(agent.target.id);
+                        if (targetBuilding) {
+                            if (targetBuilding.type === 'well') seekingCounts.water++;
+                            if (targetBuilding.type === 'farm') seekingCounts.food++;
+                            if (targetBuilding.type === 'power') seekingCounts.energy++;
+                        }
+                    }
+                    if (!agent.home) seekingCounts.home++;
+                }
+                
+                const agentCount = state.agents.length;
+                
+                // Check for resource shortages - build if too many agents seeking
+                const waterPerWell = agentCount / Math.max(1, buildingCounts.well);
+                const foodPerFarm = agentCount / Math.max(1, buildingCounts.farm);
+                const energyPerPower = agentCount / Math.max(1, buildingCounts.power);
+                const agentsPerHouse = agentCount / Math.max(1, buildingCounts.house);
+                
+                // Priority: Build resource buildings if shortage detected
+                if (seekingCounts.water > agentCount * 0.15 || waterPerWell > 20) return 'well';
+                if (seekingCounts.food > agentCount * 0.15 || foodPerFarm > 20) return 'farm';
+                if (seekingCounts.energy > agentCount * 0.15 || energyPerPower > 25) return 'power';
+                
+                // Only build houses if:
+                // 1. Many agents without homes
+                // 2. AND we have enough resources to support more population
+                const hasEnoughResources = waterPerWell < 15 && foodPerFarm < 15 && energyPerPower < 18;
+                if (seekingCounts.home > 8 && hasEnoughResources && agentsPerHouse > 12) {
+                    return 'house';
+                }
+                
+                // Build market if population is large and no market exists
+                if (agentCount > 40 && buildingCounts.market === 0) return 'market';
+                if (agentCount > 100 && buildingCounts.market < 2) return 'market';
+                
+                return null;
+            }
+            
+            initiateConstruction(buildingType) {
+                // Check if already building this type
+                for (const site of state.constructionSites.values()) {
+                    if (site.type === buildingType) {
+                        // Already building one of these, skip
+                        return;
+                    }
+                }
+                
+                // Find good location - near existing buildings but not too close
+                let bestLocation = null;
+                let attempts = 0;
+                
+                while (attempts < 10) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = 150 + Math.random() * 100;
+                    const testX = this.x + Math.cos(angle) * distance;
+                    const testY = this.y + Math.sin(angle) * distance;
+                    
+                    // Check if location is clear
+                    let clear = true;
+                    for (const building of state.buildings.values()) {
+                        const dx = building.x - testX;
+                        const dy = building.y - testY;
+                        if (Math.sqrt(dx * dx + dy * dy) < 80) {
+                            clear = false;
+                            break;
+                        }
+                    }
+                    
+                    for (const site of state.constructionSites.values()) {
+                        const dx = site.x - testX;
+                        const dy = site.y - testY;
+                        if (Math.sqrt(dx * dx + dy * dy) < 80) {
+                            clear = false;
+                            break;
+                        }
+                    }
+                    
+                    if (clear) {
+                        bestLocation = { x: testX, y: testY };
+                        break;
+                    }
+                    
+                    attempts++;
+                }
+                
+                if (bestLocation) {
+                    const site = {
+                        id: state.constructionIdCounter++,
+                        x: bestLocation.x,
+                        y: bestLocation.y,
+                        type: buildingType,
+                        progress: 0,
+                        requiredWork: BUILDING_TYPES[buildingType].cost * 30,
+                        workers: []
+                    };
+                    
+                    state.constructionSites.set(site.id, site);
+                    this.constructionTarget = site;
+                    this.target = site;
+                    this.state = 'constructing';
+                }
+            }
+            
+            constructBuilding() {
+                if (!this.constructionTarget) return;
+                
+                const site = state.constructionSites.get(this.constructionTarget.id);
+                if (!site) {
+                    this.constructionTarget = null;
+                    return;
+                }
+                
+                this.state = 'constructing';
+                this.workTimer = 30;
+                
+                // Add progress
+                site.progress += 1 * state.speed;
+                
+                if (!site.workers.includes(this.id)) {
+                    site.workers.push(this.id);
+                }
+                
+                // Check if construction complete
+                if (site.progress >= site.requiredWork) {
+                    const building = {
+                        id: state.buildingIdCounter++,
+                        x: site.x,
+                        y: site.y,
+                        type: site.type,
+                        workers: []
+                    };
+                    
+                    state.buildings.set(building.id, building);
+                    state.constructionSites.delete(site.id);
+                    this.constructionTarget = null;
+                    this.target = null;
+                    
+                    showToast(`🏗️ ${BUILDING_TYPES[site.type].emoji} built!`);
+                }
+            }
+            
+            seekResource() {
+                let needType = 'water';
+                if (this.needs.food < this.needs.water && this.needs.food < this.needs.energy) {
+                    needType = 'food';
+                } else if (this.needs.energy < this.needs.water && this.needs.energy < this.needs.food) {
+                    needType = 'energy';
+                }
+                
+                const building = this.findNearestBuilding(needType);
+                if (building) {
+                    this.target = building;
+                    this.state = 'seeking';
+                }
+            }
+            
+            findNearestBuilding(needType) {
+                let nearest = null;
+                let minDist = Infinity;
+                
+                for (const building of state.buildings.values()) {
+                    if ((needType === 'water' && building.type === 'well') ||
+                        (needType === 'food' && building.type === 'farm') ||
+                        (needType === 'energy' && building.type === 'power') ||
+                        building.type === 'market') {
+                        
+                        const dist = this.distanceTo(building);
+                        
+                        if (dist < minDist) {
+                            minDist = dist;
+                            nearest = building;
+                        }
+                    }
+                }
+                
+                return nearest;
+            }
+            
+            findWorkplace() {
+                // Prefer construction sites
+                if (state.constructionSites.size > 0 && Math.random() < 0.4) {
+                    const sites = Array.from(state.constructionSites.values());
+                    this.constructionTarget = sites[Math.floor(Math.random() * sites.length)];
+                    this.target = this.constructionTarget;
+                    this.state = 'constructing';
+                    return;
+                }
+                
+                const buildings = Array.from(state.buildings.values());
+                if (buildings.length > 0) {
+                    this.target = buildings[Math.floor(Math.random() * buildings.length)];
+                    this.workTimer = 120;
+                }
+            }
+            
+            interactWithBuilding(building) {
+                const type = BUILDING_TYPES[building.type];
+                
+                if (building.type === 'well') {
+                    this.needs.water = 100; // Full refill
+                    this.target = null;
+                    this.state = 'satisfied';
+                } else if (building.type === 'farm') {
+                    this.needs.food = 100; // Full refill
+                    this.target = null;
+                    this.state = 'satisfied';
+                } else if (building.type === 'power') {
+                    this.needs.energy = 100; // Full refill
+                    this.target = null;
+                    this.state = 'satisfied';
+                } else if (building.type === 'market') {
+                    // Market gives good amount of all resources
+                    this.needs.water = Math.min(100, this.needs.water + type.amount);
+                    this.needs.food = Math.min(100, this.needs.food + type.amount);
+                    this.needs.energy = Math.min(100, this.needs.energy + type.amount);
+                    this.target = null;
+                    this.state = 'satisfied';
+                } else if (building.type === 'house' && !this.home) {
+                    const occupants = state.agents.filter(a => a.home === building).length;
+                    if (occupants < BUILDING_TYPES.house.capacity) {
+                        this.home = building;
+                    }
+                }
+                
+                // Ensure agent moves away after interaction
+                this.wander();
+            }
+            
+            wander() {
+                if (!this.target || Math.random() < 0.08) {
+                    this.target = {
+                        x: this.x + (Math.random() - 0.5) * 200,
+                        y: this.y + (Math.random() - 0.5) * 200
+                    };
+                }
+            }
+            
+            move() {
+                if (!this.target) {
+                    this.wander();
+                    return;
+                }
+                
+                // Steering toward target
+                const dx = this.target.x - this.x;
+                const dy = this.target.y - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist > 2) {
+                    this.vx += (dx / dist) * 0.2;
+                    this.vy += (dy / dist) * 0.2;
+                }
+                
+                // Add slight randomness
+                this.vx += (Math.random() - 0.5) * 0.1;
+                this.vy += (Math.random() - 0.5) * 0.1;
+                
+                // Collision avoidance
+                const neighbors = this.getNearbyAgents(12);
+                if (neighbors.length > 2) {
+                    for (const other of neighbors) {
+                        const dx = this.x - other.x;
+                        const dy = this.y - other.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < 12 && dist > 0) {
+                            this.vx += (dx / dist) * 0.25;
+                            this.vy += (dy / dist) * 0.25;
+                        }
+                    }
+                }
+                
+                // Road speed boost
+                const onRoad = this.isOnRoad();
+                const roadBoost = onRoad ? 1.4 : 1.0;
+                
+                // Clamp speed - agents move faster now
+                const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                const maxSpeed = 3.0 * this.speed * state.speed * roadBoost;
+                if (speed > maxSpeed) {
+                    this.vx = (this.vx / speed) * maxSpeed;
+                    this.vy = (this.vy / speed) * maxSpeed;
+                }
+                
+                // Apply velocity
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Damping
+                this.vx *= 0.85;
+                this.vy *= 0.85;
+            }
+            
+            isOnRoad() {
+                const cellX = Math.floor(this.x / ROAD_CELL_SIZE);
+                const cellY = Math.floor(this.y / ROAD_CELL_SIZE);
+                const key = `${cellX},${cellY}`;
+                return state.roads.has(key);
+            }
+            
+            getNearbyAgents(radius) {
+                const nearby = [];
+                const cellX = Math.floor(this.x / CELL_SIZE);
+                const cellY = Math.floor(this.y / CELL_SIZE);
+                
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        const key = `${cellX + dx},${cellY + dy}`;
+                        const cell = state.spatialHash.get(key) || [];
+                        
+                        for (const other of cell) {
+                            if (other.id !== this.id) {
+                                const dist = Math.sqrt(
+                                    (this.x - other.x) ** 2 + (this.y - other.y) ** 2
+                                );
+                                if (dist < radius) {
+                                    nearby.push(other);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                return nearby;
+            }
+        }
+        
+        // Spatial hash
+        function updateSpatialHash() {
+            state.spatialHash.clear();
+            
+            for (const agent of state.agents) {
+                const cellX = Math.floor(agent.x / CELL_SIZE);
+                const cellY = Math.floor(agent.y / CELL_SIZE);
+                const key = `${cellX},${cellY}`;
+                
+                if (!state.spatialHash.has(key)) {
+                    state.spatialHash.set(key, []);
+                }
+                state.spatialHash.get(key).push(agent);
+            }
+        }
+        
+        // Road formation
+        function updateRoads() {
+            if (state.frame % 60 !== 0) return;
+            
+            for (const [key, traffic] of state.trafficGrid.entries()) {
+                if (traffic > ROAD_THRESHOLD && !state.roads.has(key)) {
+                    state.roads.set(key, { traffic, age: 0 });
+                }
+            }
+            
+            for (const [key, road] of state.roads.entries()) {
+                road.age++;
+                const currentTraffic = state.trafficGrid.get(key) || 0;
+                
+                if (road.age > 600 && currentTraffic < 5) {
+                    state.roads.delete(key);
+                }
+            }
+            
+            for (const [key, traffic] of state.trafficGrid.entries()) {
+                state.trafficGrid.set(key, traffic * 0.96);
+            }
+        }
+        
+        // Building functions
+        function addBuilding(x, y, type) {
+            for (const building of state.buildings.values()) {
+                const dx = building.x - x;
+                const dy = building.y - y;
+                if (Math.sqrt(dx * dx + dy * dy) < 70) {
+                    return false;
+                }
+            }
+            
+            const building = {
+                id: state.buildingIdCounter++,
+                x, y, type,
+                workers: []
+            };
+            
+            state.buildings.set(building.id, building);
+            return true;
+        }
+        
+        function removeBuilding(x, y) {
+            for (const [id, building] of state.buildings.entries()) {
+                const dx = building.x - x;
+                const dy = building.y - y;
+                if (Math.sqrt(dx * dx + dy * dy) < BUILDING_SIZE) {
+                    state.buildings.delete(id);
+                    state.agents.forEach(a => {
+                        if (a.home === building) a.home = null;
+                    });
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        // Spawn agents
+        function spawnAgents(x, y, count = 20) {
+            for (let i = 0; i < count && state.agents.length < MAX_AGENTS; i++) {
+                const angle = (Math.PI * 2 * i) / count;
+                const radius = 30;
+                const agent = new Agent(
+                    x + Math.cos(angle) * radius,
+                    y + Math.sin(angle) * radius
+                );
+                state.agents.push(agent);
+            }
+        }
+        
+        // Update loop
+        function update() {
+            if (state.paused) return;
+            
+            const beforeCount = state.agents.length;
+            state.agents = state.agents.filter(agent => agent.update());
+            const afterCount = state.agents.length;
+            
+            if (beforeCount > afterCount) {
+                const deaths = beforeCount - afterCount;
+                if (Math.random() < 0.2) {
+                    showToast(`💀 ${deaths} agent${deaths > 1 ? 's' : ''} died`);
+                }
+            }
+            
+            updateSpatialHash();
+            updateRoads();
+            
+            // Check births more frequently
+            if (state.frame % 45 === 0) {
+                checkBirths();
+            }
+            
+            state.frame++;
+        }
+        
+        function checkBirths() {
+            for (const building of state.buildings.values()) {
+                if (building.type === 'house') {
+                    const nearbyAgents = state.agents.filter(agent => {
+                        const dx = agent.x - building.x;
+                        const dy = agent.y - building.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        return dist < 50 && agent.satisfactionTimer > 60;
+                    });
+                    
+                    const occupants = state.agents.filter(a => a.home === building).length;
+                    
+                    if (nearbyAgents.length >= 2 && 
+                        occupants < BUILDING_TYPES.house.capacity &&
+                        Math.random() < 0.25 && 
+                        state.agents.length < MAX_AGENTS) {
+                        
+                        spawnAgents(building.x, building.y, 1);
+                        showToast('👶 New agent born!');
+                    }
+                }
+            }
+        }
+        
+        // Render
+        function render() {
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.scale(state.camera.zoom, state.camera.zoom);
+            ctx.translate(-state.camera.x, -state.camera.y);
+            
+            // Draw roads
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = '#555555';
+            for (const [key] of state.roads.entries()) {
+                const [cellX, cellY] = key.split(',').map(Number);
+                const x = cellX * ROAD_CELL_SIZE;
+                const y = cellY * ROAD_CELL_SIZE;
+                ctx.fillRect(x, y, ROAD_CELL_SIZE, ROAD_CELL_SIZE);
+            }
+            
+            // Draw construction sites
+            ctx.globalAlpha = 0.5;
+            for (const site of state.constructionSites.values()) {
+                const type = BUILDING_TYPES[site.type];
+                
+                // Progress circle
+                ctx.strokeStyle = type.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(site.x, site.y, 20, 0, (site.progress / site.requiredWork) * Math.PI * 2);
+                ctx.stroke();
+                
+                // Emoji
+                ctx.globalAlpha = 0.4 + (site.progress / site.requiredWork) * 0.6;
+                ctx.font = `${BUILDING_SIZE}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#fff';
+                ctx.fillText(type.emoji, site.x, site.y);
+            }
+            
+            // Draw buildings
+            for (const building of state.buildings.values()) {
+                const type = BUILDING_TYPES[building.type];
+                
+                // Radius circle
+                ctx.globalAlpha = 0.08;
+                ctx.fillStyle = type.color;
+                ctx.beginPath();
+                ctx.arc(building.x, building.y, type.radius || BUILDING_RADIUS, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Building emoji
+                ctx.globalAlpha = 1;
+                ctx.font = `${BUILDING_SIZE}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(type.emoji, building.x, building.y);
+            }
+            
+            // Draw agent trails
+            ctx.globalAlpha = 0.2;
+            for (const agent of state.agents) {
+                if (agent.trail.length < 2) continue;
+                
+                ctx.strokeStyle = STATE_COLORS[agent.state];
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(agent.trail[0].x, agent.trail[0].y);
+                for (let i = 1; i < agent.trail.length; i++) {
+                    ctx.lineTo(agent.trail[i].x, agent.trail[i].y);
+                }
+                ctx.stroke();
+            }
+            
+            // Draw agents
+            ctx.globalAlpha = 1;
+            for (const agent of state.agents) {
+                ctx.fillStyle = STATE_COLORS[agent.state];
+                ctx.beginPath();
+                ctx.arc(agent.x, agent.y, AGENT_SIZE, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+            updateUI();
+        }
+        
+        function updateUI() {
+            document.getElementById('pop-count').textContent = state.agents.length;
+            
+            const avgSatisfaction = state.agents.length > 0
+                ? state.agents.reduce((sum, a) => {
+                    return sum + (a.needs.water + a.needs.food + a.needs.energy) / 3;
+                }, 0) / state.agents.length
+                : 0;
+            document.getElementById('satisfaction').textContent = Math.round(avgSatisfaction) + '%';
+            
+            document.getElementById('building-count').textContent = state.buildings.size;
+            document.getElementById('road-count').textContent = state.roads.size;
+            
+            // Agent states
+            const states = {};
+            for (const agent of state.agents) {
+                states[agent.state] = (states[agent.state] || 0) + 1;
+            }
+            
+            const statesDiv = document.getElementById('agent-states');
+            statesDiv.innerHTML = Object.entries(states)
+                .map(([s, count]) => `<div class="popup-row"><span>${s}</span><span>${count}</span></div>`)
+                .join('');
+            
+            // Resource demand analysis
+            const buildingCounts = { well: 0, farm: 0, power: 0, house: 0 };
+            for (const building of state.buildings.values()) {
+                if (buildingCounts[building.type] !== undefined) {
+                    buildingCounts[building.type]++;
+                }
+            }
+            
+            const seekingCounts = { water: 0, food: 0, energy: 0 };
+            for (const agent of state.agents) {
+                if (agent.state === 'seeking' && agent.target) {
+                    const targetBuilding = state.buildings.get(agent.target.id);
+                    if (targetBuilding) {
+                        if (targetBuilding.type === 'well') seekingCounts.water++;
+                        if (targetBuilding.type === 'farm') seekingCounts.food++;
+                        if (targetBuilding.type === 'power') seekingCounts.energy++;
+                    }
+                }
+            }
+            
+            const demandDiv = document.getElementById('demand-info');
+            const agentCount = state.agents.length;
+            demandDiv.innerHTML = `
+                <div class="popup-row"><span>💧 Water</span><span>${seekingCounts.water}/${buildingCounts.well}</span></div>
+                <div class="popup-row"><span>🌾 Food</span><span>${seekingCounts.food}/${buildingCounts.farm}</span></div>
+                <div class="popup-row"><span>⚡ Energy</span><span>${seekingCounts.energy}/${buildingCounts.power}</span></div>
+                <div class="popup-row"><span>🏠 Houses</span><span>${buildingCounts.house}</span></div>
+            `.trim();
+            
+            // Construction info
+            const constructionDiv = document.getElementById('construction-info');
+            if (state.constructionSites.size > 0) {
+                constructionDiv.innerHTML = Array.from(state.constructionSites.values())
+                    .map(site => {
+                        const type = BUILDING_TYPES[site.type];
+                        const progress = Math.round((site.progress / site.requiredWork) * 100);
+                        return `<div class="popup-row"><span>${type.emoji} ${site.type}</span><span>${progress}%</span></div>`;
+                    })
+                    .join('');
+            } else {
+                constructionDiv.innerHTML = '<div class="popup-row" style="opacity: 0.5;"><span>No active projects</span></div>';
+            }
+        }
+        
+        // Toast notification
+        let toastTimer = null;
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+        
+        // Touch controls
+        let touches = {};
+        let lastTap = 0;
+        let longPressTimer = null;
+        
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            
+            for (const touch of e.changedTouches) {
+                touches[touch.identifier] = {
+                    startX: touch.clientX,
+                    startY: touch.clientY,
+                    x: touch.clientX,
+                    y: touch.clientY,
+                    startTime: Date.now()
+                };
+            }
+            
+            if (e.touches.length === 1) {
+                const now = Date.now();
+                if (now - lastTap < 300) {
+                    handleDoubleTap(e.touches[0]);
+                }
+                lastTap = now;
+                
+                longPressTimer = setTimeout(() => {
+                    handleLongPress(e.touches[0]);
+                }, 500);
+            }
+        });
+        
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            
+            for (const touch of e.changedTouches) {
+                if (touches[touch.identifier]) {
+                    touches[touch.identifier].x = touch.clientX;
+                    touches[touch.identifier].y = touch.clientY;
+                }
+            }
+            
+            if (e.touches.length === 2) {
+                handlePinch(e.touches);
+            } else if (e.touches.length === 1) {
+                handlePan(e.touches[0]);
+            }
+        });
+        
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            
+            if (Object.keys(touches).length === 1) {
+                const touch = e.changedTouches[0];
+                const t = touches[touch.identifier];
+                
+                if (t && Date.now() - t.startTime < 200) {
+                    handleTap(touch);
+                }
+            }
+            
+            for (const touch of e.changedTouches) {
+                delete touches[touch.identifier];
+            }
+        });
+        
+        canvas.addEventListener('click', (e) => {
+            handleTap(e);
+        });
+        
+        function handleTap(touch) {
+            const worldX = (touch.clientX - canvas.width / 2) / state.camera.zoom + state.camera.x;
+            const worldY = (touch.clientY - canvas.height / 2) / state.camera.zoom + state.camera.y;
+            
+            if (state.selectedTool === 'agents') {
+                spawnAgents(worldX, worldY);
+            } else if (state.selectedTool === 'remove') {
+                removeBuilding(worldX, worldY);
+            } else {
+                addBuilding(worldX, worldY, state.selectedTool);
+            }
+        }
+        
+        function handleDoubleTap(touch) {
+            const worldX = (touch.clientX - canvas.width / 2) / state.camera.zoom + state.camera.x;
+            const worldY = (touch.clientY - canvas.height / 2) / state.camera.zoom + state.camera.y;
+            
+            let nearest = null;
+            let minDist = Infinity;
+            
+            for (const agent of state.agents) {
+                const dx = agent.x - worldX;
+                const dy = agent.y - worldY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < minDist && dist < 30) {
+                    minDist = dist;
+                    nearest = agent;
+                }
+            }
+            
+            if (nearest) {
+                state.followAgent = nearest;
+                showToast('Following agent');
+            }
+        }
+        
+        function handleLongPress(touch) {
+            const worldX = (touch.clientX - canvas.width / 2) / state.camera.zoom + state.camera.x;
+            const worldY = (touch.clientY - canvas.height / 2) / state.camera.zoom + state.camera.y;
+            
+            let nearest = null;
+            let minDist = Infinity;
+            
+            for (const agent of state.agents) {
+                const dx = agent.x - worldX;
+                const dy = agent.y - worldY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < minDist && dist < 30) {
+                    minDist = dist;
+                    nearest = agent;
+                }
+            }
+            
+            if (nearest) {
+                showAgentPopup(nearest, touch.clientX, touch.clientY);
+            }
+        }
+        
+        function handlePan(touch) {
+            const t = touches[touch.identifier];
+            if (t) {
+                const dx = (touch.clientX - t.startX) / state.camera.zoom;
+                const dy = (touch.clientY - t.startY) / state.camera.zoom;
+                state.camera.x -= dx * 0.5;
+                state.camera.y -= dy * 0.5;
+                t.startX = touch.clientX;
+                t.startY = touch.clientY;
+            }
+        }
+        
+        function handlePinch(touchList) {
+            const t1 = touches[touchList[0].identifier];
+            const t2 = touches[touchList[1].identifier];
+            
+            if (t1 && t2) {
+                const dist = Math.hypot(
+                    touchList[0].clientX - touchList[1].clientX,
+                    touchList[0].clientY - touchList[1].clientY
+                );
+                const startDist = Math.hypot(t1.startX - t2.startX, t1.startY - t2.startY);
+                state.camera.targetZoom = Math.max(0.5, Math.min(3, dist / startDist));
+            }
+        }
+        
+        function showAgentPopup(agent, x, y) {
+            const popup = document.getElementById('agent-popup');
+            popup.innerHTML = `
+                <div class="popup-row"><strong>Agent #${agent.id}</strong></div>
+                <div class="popup-row">State: ${agent.state}</div>
+                <div class="popup-row">Water: ${Math.round(agent.needs.water)}%</div>
+                <div class="popup-row">Food: ${Math.round(agent.needs.food)}%</div>
+                <div class="popup-row">Energy: ${Math.round(agent.needs.energy)}%</div>
+                <div class="popup-row">Health: ${Math.round(agent.health)}%</div>
+                <div class="popup-row">Age: ${Math.round(agent.age / 30)}s</div>
+            `;
+            popup.style.left = Math.min(x, window.innerWidth - 150) + 'px';
+            popup.style.top = Math.min(y, window.innerHeight - 150) + 'px';
+            popup.classList.add('show');
+            
+            setTimeout(() => popup.classList.remove('show'), 3000);
+        }
+        
+        // UI controls
+        document.querySelectorAll('.tool-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                state.selectedTool = btn.dataset.tool;
+            });
+        });
+        
+        document.getElementById('pause-btn').addEventListener('click', () => {
+            state.paused = !state.paused;
+            document.getElementById('pause-btn').textContent = state.paused ? '▶️' : '⏸️';
+        });
+        
+        document.querySelectorAll('.speed-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                state.speed = parseFloat(btn.dataset.speed);
+            });
+        });
+        
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            if (confirm('Reset world?')) {
+                initWorld();
+            }
+        });
+        
+        // Swipe to open panel
+        let panelSwipeStart = null;
+        document.addEventListener('touchstart', (e) => {
+            if (e.touches[0].clientX > window.innerWidth - 20) {
+                panelSwipeStart = e.touches[0].clientX;
+            }
+        });
+        
+        document.addEventListener('touchmove', (e) => {
+            if (panelSwipeStart && e.touches[0].clientX < panelSwipeStart - 50) {
+                document.getElementById('side-panel').classList.add('open');
+                panelSwipeStart = null;
+            }
+        });
+        
+        document.addEventListener('touchend', () => {
+            panelSwipeStart = null;
+        });
+        
+        document.addEventListener('click', (e) => {
+            const panel = document.getElementById('side-panel');
+            if (panel.classList.contains('open') && !panel.contains(e.target)) {
+                panel.classList.remove('open');
+            }
+        });
+        
+        // Initialize world
+        function initWorld() {
+            state.agents = [];
+            state.buildings.clear();
+            state.constructionSites.clear();
+            state.roads.clear();
+            state.trafficGrid.clear();
+            state.camera = { x: 0, y: 0, zoom: 1, targetZoom: 1 };
+            state.frame = 0;
+            
+            // Smaller initial setup - let agents build the rest
+            addBuilding(0, -100, 'well');
+            addBuilding(-100, 60, 'farm');
+            addBuilding(100, 60, 'power');
+            addBuilding(0, 150, 'house');
+            addBuilding(0, 0, 'market'); // Add market for easier resource access
+            
+            // Start with 20 agents
+            spawnAgents(0, 150, 20);
+        }
+        
+        // Game loop
+        function gameLoop() {
+            update();
+            
+            state.camera.zoom += (state.camera.targetZoom - state.camera.zoom) * 0.1;
+            
+            if (state.followAgent && state.agents.includes(state.followAgent)) {
+                state.camera.x += (state.followAgent.x - state.camera.x) * 0.1;
+                state.camera.y += (state.followAgent.y - state.camera.y) * 0.1;
+            }
+            
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        initWorld();
+        gameLoop();
+    </script>
+</body>
+</html>
