@@ -330,7 +330,9 @@
             buildingIdCounter: 0,
             constructionIdCounter: 0,
             trafficGrid: new Map(),
-            globalResources: { materials: 0 }
+            globalResources: { materials: 0 },
+            buildingsByType: new Map(), // Performance: O(1) building type lookups
+            particles: [] // Visual effects particles
         };
         
         // Constants
@@ -357,8 +359,79 @@
             starving: '#F44336',
             satisfied: '#4CAF50',
             constructing: '#FF9800',
-            gathering: '#00BCD4'
+            gathering: '#00BCD4',
+            transporting: '#FFD700'
         };
+        
+        // Particle system for visual effects
+        class Particle {
+            constructor(x, y, emoji, vx = 0, vy = 0) {
+                this.x = x;
+                this.y = y;
+                this.emoji = emoji;
+                this.vx = vx;
+                this.vy = vy;
+                this.life = 60;
+                this.maxLife = 60;
+            }
+            
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.1; // gravity
+                this.life--;
+                return this.life > 0;
+            }
+        }
+        
+        // Simple pathfinding that prefers roads
+        function calculatePath(startX, startY, endX, endY) {
+            // Simplified pathfinding: create waypoints that prefer roads
+            const path = [];
+            const steps = 8;
+            
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                let x = startX + (endX - startX) * t;
+                let y = startY + (endY - startY) * t;
+                
+                // Check nearby cells for roads and bias toward them
+                if (i > 0 && i < steps) {
+                    let bestX = x, bestY = y;
+                    let bestScore = 0;
+                    
+                    for (let dx = -2; dx <= 2; dx++) {
+                        for (let dy = -2; dy <= 2; dy++) {
+                            const testX = x + dx * ROAD_CELL_SIZE;
+                            const testY = y + dy * ROAD_CELL_SIZE;
+                            const cellX = Math.floor(testX / ROAD_CELL_SIZE);
+                            const cellY = Math.floor(testY / ROAD_CELL_SIZE);
+                            const key = `${cellX},${cellY}`;
+                            
+                            if (state.roads.has(key)) {
+                                // Score based on road traffic and distance to path
+                                const dist = Math.abs(dx) + Math.abs(dy);
+                                const score = (state.roads.get(key).traffic || 50) / (dist + 1);
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    bestX = testX;
+                                    bestY = testY;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (bestScore > 10) {
+                        x = bestX;
+                        y = bestY;
+                    }
+                }
+                
+                path.push({ x, y });
+            }
+            
+            return path;
+        }
         
         // Agent class
         class Agent {
@@ -381,6 +454,12 @@
                 this.constructionTarget = null;
                 this.carryingMaterials = 0;
                 this.trail = [];
+                this.carryingResource = null; // 'water', 'food', 'energy', 'materials'
+                this.carryingAmount = 0;
+                this.sourceBuilding = null;
+                this.destinationBuilding = null;
+                this.path = null; // Pathfinding path
+                this.pathIndex = 0;
             }
             
             update() {
@@ -450,6 +529,20 @@
             }
             
             makeDecision() {
+                // Handle resource transportation
+                if (this.state === 'transporting' && this.carryingResource) {
+                    if (this.destinationBuilding) {
+                        const dist = this.distanceTo(this.destinationBuilding);
+                        if (dist < BUILDING_RADIUS) {
+                            // Deliver resource
+                            this.deliverResource();
+                            return;
+                        }
+                    }
+                    // Continue transporting
+                    return;
+                }
+                
                 // Check if at target
                 if (this.target) {
                     const dist = this.distanceTo(this.target);
@@ -496,6 +589,13 @@
                         const buildingNeeded = this.checkBuildingNeeds();
                         if (buildingNeeded) {
                             this.initiateConstruction(buildingNeeded);
+                            return;
+                        }
+                    }
+                    
+                    // Transport resources to create bustling activity
+                    if (Math.random() < 0.15 * state.speed && !this.carryingResource) {
+                        if (this.selectTransportMission()) {
                             return;
                         }
                     }
@@ -769,15 +869,136 @@
                 }
             }
             
+            selectTransportMission() {
+                // Look for resource buildings to transport from
+                const resourceBuildings = [];
+                const markets = [];
+                const constructionSites = [];
+                
+                for (const building of state.buildings.values()) {
+                    if (building.type === 'well' || building.type === 'farm' || building.type === 'power') {
+                        resourceBuildings.push(building);
+                    } else if (building.type === 'market') {
+                        markets.push(building);
+                    }
+                }
+                
+                for (const site of state.constructionSites.values()) {
+                    constructionSites.push(site);
+                }
+                
+                // Prioritize transporting materials to construction sites
+                if (constructionSites.length > 0 && Math.random() < 0.4) {
+                    const site = constructionSites[Math.floor(Math.random() * constructionSites.length)];
+                    this.carryingResource = 'materials';
+                    this.carryingAmount = 10;
+                    this.destinationBuilding = site;
+                    this.target = site;
+                    this.state = 'transporting';
+                    this.path = calculatePath(this.x, this.y, site.x, site.y);
+                    this.pathIndex = 0;
+                    
+                    // Create pickup particle effect
+                    for (let i = 0; i < 3; i++) {
+                        state.particles.push(new Particle(
+                            this.x, this.y, '🧱',
+                            (Math.random() - 0.5) * 2, -Math.random() * 2
+                        ));
+                    }
+                    return true;
+                }
+                
+                // Transport resources to markets
+                if (resourceBuildings.length > 0 && markets.length > 0 && Math.random() < 0.6) {
+                    const source = resourceBuildings[Math.floor(Math.random() * resourceBuildings.length)];
+                    const dest = markets[Math.floor(Math.random() * markets.length)];
+                    
+                    let resourceType = 'water';
+                    if (source.type === 'farm') resourceType = 'food';
+                    else if (source.type === 'power') resourceType = 'energy';
+                    
+                    this.sourceBuilding = source;
+                    this.destinationBuilding = dest;
+                    this.carryingResource = resourceType;
+                    this.carryingAmount = 20;
+                    this.target = dest;
+                    this.state = 'transporting';
+                    this.path = calculatePath(this.x, this.y, dest.x, dest.y);
+                    this.pathIndex = 0;
+                    
+                    // Create pickup particle effect
+                    const emoji = resourceType === 'water' ? '💧' : resourceType === 'food' ? '🌾' : '⚡';
+                    for (let i = 0; i < 3; i++) {
+                        state.particles.push(new Particle(
+                            this.x, this.y, emoji,
+                            (Math.random() - 0.5) * 2, -Math.random() * 2
+                        ));
+                    }
+                    return true;
+                }
+                
+                return false;
+            }
+            
+            deliverResource() {
+                if (!this.destinationBuilding || !this.carryingResource) return;
+                
+                // Create delivery particle effect
+                const emoji = this.carryingResource === 'water' ? '💧' : 
+                             this.carryingResource === 'food' ? '🌾' : 
+                             this.carryingResource === 'energy' ? '⚡' : '🧱';
+                
+                for (let i = 0; i < 5; i++) {
+                    state.particles.push(new Particle(
+                        this.x, this.y, emoji,
+                        (Math.random() - 0.5) * 3, -Math.random() * 3
+                    ));
+                }
+                
+                // Clear transport state
+                this.carryingResource = null;
+                this.carryingAmount = 0;
+                this.sourceBuilding = null;
+                this.destinationBuilding = null;
+                this.target = null;
+                this.path = null;
+                this.state = 'satisfied';
+            }
+            
             move() {
                 if (!this.target) {
                     this.wander();
                     return;
                 }
                 
-                // Steering toward target
-                const dx = this.target.x - this.x;
-                const dy = this.target.y - this.y;
+                // Use pathfinding if available
+                let targetX = this.target.x;
+                let targetY = this.target.y;
+                
+                if (this.path && this.path.length > 0) {
+                    // Follow path waypoints
+                    const waypoint = this.path[this.pathIndex];
+                    if (waypoint) {
+                        const waypointDist = Math.sqrt(
+                            (waypoint.x - this.x) ** 2 + (waypoint.y - this.y) ** 2
+                        );
+                        
+                        if (waypointDist < 15) {
+                            this.pathIndex++;
+                            if (this.pathIndex >= this.path.length) {
+                                this.path = null;
+                                this.pathIndex = 0;
+                            }
+                        } else {
+                            targetX = waypoint.x;
+                            targetY = waypoint.y;
+                        }
+                    }
+                }
+                
+                // Steering toward target (or waypoint)
+                const dx = targetX - this.x;
+                const dy = targetY - this.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 
                 if (dist > 2) {
@@ -805,9 +1026,9 @@
                 
                 // Road speed boost
                 const onRoad = this.isOnRoad();
-                const roadBoost = onRoad ? 1.4 : 1.0;
+                const roadBoost = onRoad ? 1.5 : 1.0;
                 
-                // Clamp speed - agents move faster now
+                // Clamp speed - agents move faster now, especially on roads
                 const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
                 const maxSpeed = 3.0 * this.speed * state.speed * roadBoost;
                 if (speed > maxSpeed) {
@@ -915,6 +1136,13 @@
             };
             
             state.buildings.set(building.id, building);
+            
+            // Update cache
+            if (!state.buildingsByType.has(type)) {
+                state.buildingsByType.set(type, []);
+            }
+            state.buildingsByType.get(type).push(building);
+            
             return true;
         }
         
@@ -927,6 +1155,10 @@
                     state.agents.forEach(a => {
                         if (a.home === building) a.home = null;
                     });
+                    
+                    // Update cache
+                    updateBuildingsCache();
+                    
                     return true;
                 }
             }
@@ -964,12 +1196,31 @@
             updateSpatialHash();
             updateRoads();
             
+            // Update particles
+            state.particles = state.particles.filter(p => p.update());
+            
+            // Update buildingsByType cache periodically
+            if (state.frame % 60 === 0) {
+                updateBuildingsCache();
+            }
+            
             // Check births more frequently
             if (state.frame % 45 === 0) {
                 checkBirths();
             }
             
             state.frame++;
+        }
+        
+        // Performance: Cache buildings by type
+        function updateBuildingsCache() {
+            state.buildingsByType.clear();
+            for (const building of state.buildings.values()) {
+                if (!state.buildingsByType.has(building.type)) {
+                    state.buildingsByType.set(building.type, []);
+                }
+                state.buildingsByType.get(building.type).push(building);
+            }
         }
         
         function checkBirths() {
@@ -996,27 +1247,52 @@
             }
         }
         
-        // Render
-        function render() {
-            ctx.fillStyle = '#0a0a0a';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            ctx.save();
-            ctx.translate(canvas.width / 2, canvas.height / 2);
-            ctx.scale(state.camera.zoom, state.camera.zoom);
-            ctx.translate(-state.camera.x, -state.camera.y);
-            
-            // Draw roads
-            ctx.globalAlpha = 0.3;
-            ctx.fillStyle = '#555555';
-            for (const [key] of state.roads.entries()) {
+        // Render functions - organized for better maintainability
+        function renderRoads() {
+            for (const [key, road] of state.roads.entries()) {
                 const [cellX, cellY] = key.split(',').map(Number);
                 const x = cellX * ROAD_CELL_SIZE;
                 const y = cellY * ROAD_CELL_SIZE;
-                ctx.fillRect(x, y, ROAD_CELL_SIZE, ROAD_CELL_SIZE);
+                
+                // Calculate intensity based on traffic
+                const currentTraffic = state.trafficGrid.get(key) || 0;
+                const intensity = Math.min(1, currentTraffic / 100);
+                
+                // Color transitions: light gray -> brown -> dark brown
+                let r, g, b;
+                if (intensity < 0.3) {
+                    // Light gray to brown
+                    const t = intensity / 0.3;
+                    r = Math.floor(180 + (139 - 180) * t);
+                    g = Math.floor(180 + (90 - 180) * t);
+                    b = Math.floor(180 + (60 - 180) * t);
+                } else {
+                    // Brown to dark brown
+                    const t = (intensity - 0.3) / 0.7;
+                    r = Math.floor(139 + (90 - 139) * t);
+                    g = Math.floor(90 + (60 - 90) * t);
+                    b = Math.floor(60 + (30 - 60) * t);
+                }
+                
+                // Opacity based on intensity
+                ctx.globalAlpha = 0.4 + intensity * 0.4;
+                ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                
+                // Width varies with traffic
+                const roadSize = ROAD_CELL_SIZE + intensity * 4;
+                const offset = (ROAD_CELL_SIZE - roadSize) / 2;
+                ctx.fillRect(x + offset, y + offset, roadSize, roadSize);
+                
+                // Glow effect for heavily used roads
+                if (intensity > 0.6) {
+                    ctx.globalAlpha = (intensity - 0.6) * 0.3;
+                    ctx.fillStyle = `rgb(${r + 30}, ${g + 20}, ${b + 10})`;
+                    ctx.fillRect(x + offset - 2, y + offset - 2, roadSize + 4, roadSize + 4);
+                }
             }
-            
-            // Draw construction sites
+        }
+        
+        function renderConstructionSites() {
             ctx.globalAlpha = 0.5;
             for (const site of state.constructionSites.values()) {
                 const type = BUILDING_TYPES[site.type];
@@ -1036,8 +1312,9 @@
                 ctx.fillStyle = '#fff';
                 ctx.fillText(type.emoji, site.x, site.y);
             }
-            
-            // Draw buildings
+        }
+        
+        function renderBuildings() {
             for (const building of state.buildings.values()) {
                 const type = BUILDING_TYPES[building.type];
                 
@@ -1055,8 +1332,9 @@
                 ctx.textBaseline = 'middle';
                 ctx.fillText(type.emoji, building.x, building.y);
             }
-            
-            // Draw agent trails
+        }
+        
+        function renderAgentTrails() {
             ctx.globalAlpha = 0.2;
             for (const agent of state.agents) {
                 if (agent.trail.length < 2) continue;
@@ -1070,15 +1348,61 @@
                 }
                 ctx.stroke();
             }
-            
-            // Draw agents
+        }
+        
+        function renderAgents() {
             ctx.globalAlpha = 1;
             for (const agent of state.agents) {
                 ctx.fillStyle = STATE_COLORS[agent.state];
                 ctx.beginPath();
                 ctx.arc(agent.x, agent.y, AGENT_SIZE, 0, Math.PI * 2);
                 ctx.fill();
+                
+                // Draw resource being carried
+                if (agent.carryingResource) {
+                    const emoji = agent.carryingResource === 'water' ? '💧' : 
+                                 agent.carryingResource === 'food' ? '🌾' : 
+                                 agent.carryingResource === 'energy' ? '⚡' : '🧱';
+                    
+                    // Bobbing animation
+                    const bobOffset = Math.sin(state.frame * 0.1 + agent.id) * 2;
+                    
+                    ctx.font = '12px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(emoji, agent.x, agent.y - 10 + bobOffset);
+                }
             }
+        }
+        
+        function renderParticles() {
+            ctx.globalAlpha = 0.8;
+            for (const particle of state.particles) {
+                const lifeRatio = particle.life / particle.maxLife;
+                ctx.globalAlpha = lifeRatio * 0.8;
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(particle.emoji, particle.x, particle.y);
+            }
+        }
+        
+        // Main render function
+        function render() {
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.scale(state.camera.zoom, state.camera.zoom);
+            ctx.translate(-state.camera.x, -state.camera.y);
+            
+            renderRoads();
+            renderConstructionSites();
+            renderBuildings();
+            renderAgentTrails();
+            renderAgents();
+            renderParticles();
             
             ctx.restore();
             updateUI();
@@ -1405,6 +1729,8 @@
             state.constructionSites.clear();
             state.roads.clear();
             state.trafficGrid.clear();
+            state.buildingsByType.clear();
+            state.particles = [];
             state.camera = { x: 0, y: 0, zoom: 1, targetZoom: 1 };
             state.frame = 0;
             
@@ -1414,6 +1740,9 @@
             addBuilding(100, 60, 'power');
             addBuilding(0, 150, 'house');
             addBuilding(0, 0, 'market'); // Add market for easier resource access
+            
+            // Initialize buildings cache
+            updateBuildingsCache();
             
             // Start with 20 agents
             spawnAgents(0, 150, 20);
